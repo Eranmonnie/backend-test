@@ -18,6 +18,7 @@ This service should
 - Have ability to a special thank you message via email or sms or any communication channel, if they make two(2) or more donations.
 - Allow a user view all donation made in a given period of time.
 - Allow a user view a single donation made to a fellow user (beneficiary)
+- Allow a user view the transaction created for a donation
 
 ### Documentation
 
@@ -43,3 +44,7 @@ Please implement load testing to ensure your service can handle a high amount of
 1. Implement load testing using `artillery`
 2. Ensure that load testing is able to be run using `npm test:load`. You can consider using a tool like `forever` to spin up a daemon and kill it after the load test has completed.
 3. Test all endpoints under at least `100 rps` for `30s` and ensure that `p99` is under `50ms`
+4. Databse actions created are atomic
+5. Financial transactions are idempotent
+6. Date are UTC Compliant
+7. Racing condition is mitigated
