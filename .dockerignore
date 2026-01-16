@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.env
+.env.local
+dev.db
+dev.db-journal
+report.json
+report.json.html
+coverage
+docker-compose.yml
+npm-debug.log*
+tests
