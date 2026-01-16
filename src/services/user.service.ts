@@ -1,5 +1,6 @@
 import prisma from '../utils/prisma';
 import { NotFoundError } from '../utils/errors';
+import redis from '../config/redis';
 
 export class UserService {
     /**
@@ -11,8 +12,15 @@ export class UserService {
      * @returns Paginated user list with wallet and donation counts
      */
     async getUsers(page: number = 1, limit: number = 10, search?: string) {
+        const cacheKey = `users:${page}:${limit}:${search || 'all'}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         const skip = (page - 1) * limit;
-        
+
         // Build where clause for search
         const where = search ? {
             OR: [
@@ -52,7 +60,7 @@ export class UserService {
             prisma.user.count({ where }),
         ]);
 
-        return {
+        const result = {
             data: users,
             meta: {
                 total,
@@ -61,6 +69,10 @@ export class UserService {
                 pages: Math.ceil(total / limit),
             },
         };
+
+        await redis.setex(cacheKey, 300, JSON.stringify(result)); // Cache for 5 minutes
+
+        return result;
     }
 
     /**
@@ -70,6 +82,13 @@ export class UserService {
      * @throws NotFoundError if user doesn't exist
      */
     async getUserById(userId: string) {
+        const cacheKey = `user:${userId}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         const user = await prisma.user.findUnique({
             where: { id: userId },
             select: {
@@ -100,6 +119,8 @@ export class UserService {
             throw new NotFoundError('User not found');
         }
 
+        await redis.setex(cacheKey, 300, JSON.stringify(user));
+
         return user;
     }
 
@@ -110,6 +131,13 @@ export class UserService {
      * @throws NotFoundError if wallet doesn't exist
      */
     async getUserWallet(userId: string) {
+        const cacheKey = `wallet:${userId}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         const wallet = await prisma.wallet.findUnique({
             where: { userId },
             select: {
@@ -123,6 +151,8 @@ export class UserService {
         if (!wallet) {
             throw new NotFoundError('Wallet not found');
         }
+
+        await redis.setex(cacheKey, 60, JSON.stringify(wallet)); // Cache for 1 minute
 
         return wallet;
     }

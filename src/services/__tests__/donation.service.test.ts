@@ -1,7 +1,7 @@
 import { DonationService } from '../donation.service';
 import prisma from '../../utils/prisma';
+import { donationQueue } from '../../queues/donation.queue';
 import { NotFoundError, ValidationError } from '../../utils/errors';
-import { emailService } from '../email.service';
 
 // Mock dependencies
 jest.mock('../../utils/prisma', () => ({
@@ -19,7 +19,18 @@ jest.mock('../../utils/prisma', () => ({
     $transaction: jest.fn(),
   },
 }));
-jest.mock('../email.service');
+jest.mock('../../queues/donation.queue', () => ({
+  DONATION_QUEUE_NAME: 'donation-queue',
+  donationQueue: {
+    add: jest.fn(),
+  },
+}));
+jest.mock('../../queues/notification.queue', () => ({
+  NOTIFICATION_QUEUE_NAME: 'notification-queue',
+  notificationQueue: {
+    add: jest.fn(),
+  },
+}));
 
 describe('DonationService', () => {
   let donationService: DonationService;
@@ -41,57 +52,29 @@ describe('DonationService', () => {
       },
     };
 
-    const mockBeneficiary = {
-      id: 'beneficiary-123',
-      email: 'beneficiary@example.com',
-      firstName: 'Jane',
-      lastName: 'Recipient',
-      wallet: {
-        id: 'wallet-beneficiary',
-        balance: 5000,
-      },
-    };
-
     const donationData = {
       beneficiaryId: 'beneficiary-123',
       amount: 1000,
       pin: '1234',
     };
 
-    it('should create a donation successfully', async () => {
-      const mockDonation = {
-        id: 'donation-123',
-        donorId: mockDonor.id,
-        beneficiaryId: mockBeneficiary.id,
-        amount: donationData.amount,
-        createdAt: new Date(),
-      };
+    it('should enqueue donation job when validation passes', async () => {
+      const queueResponse = { id: 'job-123' };
 
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockDonor) // donor
-        .mockResolvedValueOnce(mockBeneficiary); // beneficiary
-
-      (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        const tx = {
-          wallet: {
-            update: jest.fn().mockResolvedValue({}),
-          },
-          donation: {
-            create: jest.fn().mockResolvedValue(mockDonation),
-          },
-          transaction: {
-            create: jest.fn().mockResolvedValue({}),
-          },
-        };
-        return callback(tx);
-      });
-
-      (prisma.donation.count as jest.Mock).mockResolvedValue(1);
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockDonor);
+      (donationQueue.add as jest.Mock).mockResolvedValue(queueResponse);
 
       const result = await donationService.makeDonation(mockDonor.id, donationData);
 
-      expect(result).toEqual(mockDonation);
-      expect(prisma.user.findUnique).toHaveBeenCalledTimes(2);
+      expect(donationQueue.add).toHaveBeenCalledWith('process-donation', {
+        donorId: mockDonor.id,
+        dto: donationData,
+      });
+      expect(result).toEqual({
+        message: 'Donation processing started',
+        jobId: queueResponse.id,
+        status: 'queued',
+      });
     });
 
     it('should throw NotFoundError if donor not found', async () => {
@@ -100,6 +83,7 @@ describe('DonationService', () => {
       await expect(
         donationService.makeDonation('invalid-donor', donationData)
       ).rejects.toThrow('Donor not found');
+      expect(donationQueue.add).not.toHaveBeenCalled();
     });
 
     it('should throw ValidationError if insufficient funds', async () => {
@@ -113,16 +97,7 @@ describe('DonationService', () => {
       await expect(
         donationService.makeDonation(poorDonor.id, donationData)
       ).rejects.toThrow('Insufficient funds');
-    });
-
-    it('should throw NotFoundError if beneficiary not found', async () => {
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockDonor)
-        .mockResolvedValueOnce(null);
-
-      await expect(
-        donationService.makeDonation(mockDonor.id, donationData)
-      ).rejects.toThrow('Beneficiary not found');
+      expect(donationQueue.add).not.toHaveBeenCalled();
     });
 
     it('should throw ValidationError if trying to donate to self', async () => {
@@ -132,77 +107,32 @@ describe('DonationService', () => {
         pin: '1234',
       };
 
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockDonor)
-        .mockResolvedValueOnce(mockDonor);
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockDonor);
 
       await expect(
         donationService.makeDonation(mockDonor.id, selfDonationData)
       ).rejects.toThrow('Cannot donate to yourself');
+      expect(donationQueue.add).not.toHaveBeenCalled();
     });
 
-    it('should send thank you email at milestone (2nd donation)', async () => {
-      const mockDonation = {
-        id: 'donation-123',
-        donorId: mockDonor.id,
-        beneficiaryId: mockBeneficiary.id,
-        amount: donationData.amount,
-        createdAt: new Date(),
-      };
+    it('should enforce minimum donation amount', async () => {
+      const invalidDonation = { ...donationData, amount: 20 };
 
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockDonor)
-        .mockResolvedValueOnce(mockBeneficiary);
-
-      (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        const tx = {
-          wallet: { update: jest.fn() },
-          donation: { create: jest.fn().mockResolvedValue(mockDonation) },
-          transaction: { create: jest.fn() },
-        };
-        return callback(tx);
-      });
-
-      (prisma.donation.count as jest.Mock).mockResolvedValue(2); // 2nd donation
-      (emailService.sendThankYouEmail as jest.Mock).mockResolvedValue(undefined);
-
-      await donationService.makeDonation(mockDonor.id, donationData);
-
-      expect(emailService.sendThankYouEmail).toHaveBeenCalledWith(
-        mockDonor.email,
-        mockBeneficiary.firstName,
-        mockDonor.firstName,
-        2
-      );
+      await expect(
+        donationService.makeDonation(mockDonor.id, invalidDonation)
+      ).rejects.toThrow('Donation amount must be greater than fifty naira');
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(donationQueue.add).not.toHaveBeenCalled();
     });
 
-    it('should not send email for non-milestone donations', async () => {
-      const mockDonation = {
-        id: 'donation-123',
-        donorId: mockDonor.id,
-        beneficiaryId: mockBeneficiary.id,
-        amount: donationData.amount,
-        createdAt: new Date(),
-      };
+    it('should enforce maximum donation amount', async () => {
+      const invalidDonation = { ...donationData, amount: 60000 };
 
-      (prisma.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockDonor)
-        .mockResolvedValueOnce(mockBeneficiary);
-
-      (prisma.$transaction as jest.Mock).mockImplementation(async (callback) => {
-        const tx = {
-          wallet: { update: jest.fn() },
-          donation: { create: jest.fn().mockResolvedValue(mockDonation) },
-          transaction: { create: jest.fn() },
-        };
-        return callback(tx);
-      });
-
-      (prisma.donation.count as jest.Mock).mockResolvedValue(3); // 3rd donation (not a milestone)
-
-      await donationService.makeDonation(mockDonor.id, donationData);
-
-      expect(emailService.sendThankYouEmail).not.toHaveBeenCalled();
+      await expect(
+        donationService.makeDonation(mockDonor.id, invalidDonation)
+      ).rejects.toThrow('Donation amount cannot not exceed ₦50,000');
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(donationQueue.add).not.toHaveBeenCalled();
     });
   });
 

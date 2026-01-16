@@ -6,6 +6,7 @@ import { z } from 'zod';
 import prisma from '../utils/prisma';
 import logger from '../utils/logger';
 import { fundWalletSchema } from '../utils/validation';
+import redis from '../config/redis';
 
 const paystackService = new PaystackService();
 
@@ -248,6 +249,23 @@ export class PaystackController {
                     data: { balance: { increment: amount } }
                 });
             });
+
+            // Find user ID from wallet
+            const wallet = await prisma.wallet.findUnique({
+                where: { id: transaction.walletId },
+                select: { userId: true }
+            });
+
+            if (wallet) {
+                // Invalidate wallet and user caches
+                await redis.del(`wallet:${wallet.userId}`);
+                await redis.del(`user:${wallet.userId}`);
+                const usersKeys = await redis.keys('users:*');
+                if (usersKeys.length > 0) {
+                    await redis.del(...usersKeys);
+                }
+                logger.debug(`Caches invalidated after wallet funding for user ${wallet.userId}`);
+            }
 
             logger.info('Wallet credited via webhook', {
                 walletId: transaction.walletId,

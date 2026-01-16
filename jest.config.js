@@ -15,6 +15,8 @@ module.exports = {
   coverageDirectory: 'coverage',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^\\.\\.\\/config\\/redis$': '<rootDir>/test/mocks/redis',
   },
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   testTimeout: 10000,
 };

@@ -3,7 +3,9 @@ import logger from '../utils/logger';
 import { NotFoundError, ValidationError } from '../utils/errors';
 import { DonationDataDto } from '../utils/validation';
 import { NOTIFICATION_MILESTONES } from '../utils/constants';
-import { emailService } from './email.service';
+import { notificationQueue } from '../queues/notification.queue';
+import { donationQueue } from '../queues/donation.queue';
+import redis from '../config/redis';
 
 /**
  * Check if we should send a thank you notification
@@ -28,15 +30,16 @@ export class DonationService {
      */
     async makeDonation(donorId: string, dto: DonationDataDto) {
 
-        if (dto.amount < 50 ) {
+        if (dto.amount < 50) {
             throw new ValidationError('Donation amount must be greater than fifty naira');
         }
 
-        
-        if (dto.amount > 50000 ) {
+
+        if (dto.amount > 50000) {
             throw new ValidationError('Donation amount cannot not exceed ₦50,000');
         }
-        // Validate Donor and PIN
+
+        // Basic validation before queuing
         const donor = await prisma.user.findUnique({
             where: { id: donorId },
             include: { wallet: true },
@@ -51,104 +54,22 @@ export class DonationService {
             throw new ValidationError('Insufficient funds');
         }
 
-        // Validate Beneficiary
-        const beneficiary = await prisma.user.findUnique({
-            where: { id: dto.beneficiaryId },
-            include: { wallet: true },
-        });
-
-        if (!beneficiary || !beneficiary.wallet) {
-            throw new NotFoundError('Beneficiary not found');
-        }
-
         // Prevent self donation
         if (donorId === dto.beneficiaryId) {
             throw new ValidationError('Cannot donate to yourself');
         }
 
-        const result = await prisma.$transaction(async (tx: any) => {
-            // Debit Donor
-            await tx.wallet.update({
-                where: { id: donor.wallet!.id },
-                data: { balance: { decrement: dto.amount } },
-            });
-
-            // Credit Beneficiary
-            await tx.wallet.update({
-                where: { id: beneficiary.wallet!.id },
-                data: { balance: { increment: dto.amount } },
-            });
-
-            // Create Donation
-            const donation = await tx.donation.create({
-                data: {
-                    donorId,
-                    beneficiaryId: dto.beneficiaryId,
-                    amount: dto.amount,
-                },
-            });
-
-            // Create Transactions
-            await tx.transaction.create({
-                data: {
-                    walletId: donor.wallet!.id,
-                    type: 'DEBIT',
-                    amount: dto.amount,
-                    reference: `DON-${donation.id}-DEBIT`,
-                    status: 'SUCCESS',
-                    donationId: donation.id,
-                },
-            });
-
-            await tx.transaction.create({
-                data: {
-                    walletId: beneficiary.wallet!.id,
-                    type: 'CREDIT',
-                    amount: dto.amount,
-                    reference: `DON-${donation.id}-CREDIT`,
-                    status: 'SUCCESS',
-                    donationId: donation.id,
-                },
-            });
-
-            return donation;
+        // Add to queue
+        const job = await donationQueue.add('process-donation', {
+            donorId,
+            dto
         });
 
-        const donationCount = await prisma.donation.count({
-            where: {
-                donorId,
-                beneficiaryId: dto.beneficiaryId
-            },
-        });
-
-        // Only send notification at milestones  2, 5, 10, 25, 50, 100
-        if (shouldSendThankYou(donationCount)) {
-            try {
-                await emailService.sendThankYouEmail(
-                    donor.email,
-                    beneficiary.firstName || 'Beneficiary',
-                    donor.firstName || 'Donor',
-                    donationCount
-                );
-
-                logger.info('Thank you notification sent', {
-                    donorId,
-                    beneficiaryId: dto.beneficiaryId,
-                    donationCount,
-                    milestone: true,
-                });
-            } catch (error) {
-                // Log errors but dont fail 
-                logger.error('Failed to send thank you email', {
-                    donorId,
-                    beneficiaryId: dto.beneficiaryId,
-                    donationCount,
-                    error,
-                });
-            }
-        }
-
-        return result;
+        return {
+            message: 'Donation processing started',
+            jobId: job.id,
+            status: 'queued'
+        };
     }
 
     /**
@@ -163,6 +84,13 @@ export class DonationService {
      * @returns Paginated donation list with metadata
      */
     async getDonations(userId: string, donor: boolean = false, page: number = 1, limit: number = 10, startDate?: Date, endDate?: Date) {
+        const cacheKey = `donations:${userId}:${donor}:${page}:${limit}:${startDate?.toISOString()}:${endDate?.toISOString()}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         const skip = (page - 1) * limit;
         var where: any = {}
 
@@ -194,7 +122,7 @@ export class DonationService {
 
         const total = await prisma.donation.count({ where });
 
-        return {
+        const result = {
             data: donations,
             meta: {
                 total,
@@ -203,6 +131,10 @@ export class DonationService {
                 pages: Math.ceil(total / limit),
             },
         };
+
+        await redis.setex(cacheKey, 300, JSON.stringify(result)); // Cache for 5 minutes
+
+        return result;
     }
 
     /**
@@ -216,6 +148,13 @@ export class DonationService {
      * @throws ValidationError if user is neither donor nor beneficiary
      */
     async getDonation(id: string, userId: string) {
+        const cacheKey = `donation:${id}:${userId}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
         const donation = await prisma.donation.findUnique({
             where: { id },
             include: {
@@ -246,11 +185,15 @@ export class DonationService {
             }
         });
 
-        return {
+        const result = {
             ...donation,
             transactions: filteredTransactions,
             userRole: isDonor ? 'donor' : 'beneficiary'
         };
+
+        await redis.setex(cacheKey, 300, JSON.stringify(result));
+
+        return result;
     }
 
     /**

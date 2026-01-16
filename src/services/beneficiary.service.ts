@@ -2,6 +2,7 @@ import prisma from '../utils/prisma';
 import { ConflictError, NotFoundError } from '../utils/errors';
 import logger from '../utils/logger';
 import { AddBeneficiaryDataDto } from '../utils/validation';
+import redis from '../config/redis';
 
 export class BeneficiaryService {
     /**
@@ -76,6 +77,14 @@ export class BeneficiaryService {
 
         logger.info(`Beneficiary added: ${dto.beneficiaryId} by user ${userId}`);
 
+        // Invalidate cache for this user's beneficiaries
+        const pattern = `beneficiaries:${userId}:*`;
+        const keys = await redis.keys(pattern);
+        if (keys.length > 0) {
+            await redis.del(...keys);
+            logger.debug(`Cache invalidated: ${pattern} (${keys.length} keys)`);
+        }
+
         return {
             id: beneficiary.id,
             beneficiaryId: beneficiary.beneficiaryId,
@@ -95,6 +104,15 @@ export class BeneficiaryService {
      * @returns Paginated list of beneficiaries with metadata
      */
     async getBeneficiaries(userId: string, page: number = 1, limit: number = 10, search?: string) {
+        // Check cache first
+        const cacheKey = `beneficiaries:${userId}:${page}:${limit}:${search || 'all'}`;
+        const cached = await redis.get(cacheKey);
+
+        if (cached) {
+            logger.debug(`Cache HIT: ${cacheKey}`);
+            return JSON.parse(cached);
+        }
+
         const skip = (page - 1) * limit;
 
         // Build where clause with search
@@ -134,7 +152,7 @@ export class BeneficiaryService {
 
         const total = await prisma.beneficiary.count({ where });
 
-        return {
+        const result = {
             data: beneficiaries.map((b) => ({
                 id: b.id,
                 beneficiaryId: b.beneficiaryId,
@@ -151,6 +169,12 @@ export class BeneficiaryService {
                 pages: Math.ceil(total / limit),
             },
         };
+
+        // Cache for 5 minutes
+        await redis.setex(cacheKey, 300, JSON.stringify(result));
+        logger.debug(`Cache SET: ${cacheKey}`);
+
+        return result;
     }
 
     /**
@@ -179,6 +203,14 @@ export class BeneficiaryService {
         });
 
         logger.info(`Beneficiary removed: ${beneficiaryId} by user ${userId}`);
+
+        // Invalidate cache for this user's beneficiaries
+        const pattern = `beneficiaries:${userId}:*`;
+        const keys = await redis.keys(pattern);
+        if (keys.length > 0) {
+            await redis.del(...keys);
+            logger.debug(`Cache invalidated: ${pattern} (${keys.length} keys)`);
+        }
 
         return { message: 'Beneficiary removed successfully' };
     }
@@ -235,6 +267,16 @@ export class BeneficiaryService {
                 }
             }
         });
+
+        logger.info(`Beneficiary nickname updated: ${beneficiaryId} by user ${userId}`);
+
+        // Invalidate cache for this user's beneficiaries
+        const pattern = `beneficiaries:${userId}:*`;
+        const keys = await redis.keys(pattern);
+        if (keys.length > 0) {
+            await redis.del(...keys);
+            logger.debug(`Cache invalidated: ${pattern} (${keys.length} keys)`);
+        }
 
         return {
             id: updated.id,

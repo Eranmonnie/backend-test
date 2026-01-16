@@ -22,12 +22,15 @@ app.use(helmet());
 app.use(cors());
 
 // Rate Limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.',
-});
-app.use('/api/', limiter);
+// Rate Limiting
+if (!env.DISABLE_RATE_LIMIT) {
+    const limiter = rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 100, // Limit each IP to 100 requests per windowMs
+        message: 'Too many requests from this IP, please try again later.',
+    });
+    app.use('/api/', limiter);
+}
 
 // Body Parser - Special handling for Paystack webhook to preserve raw body
 app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));

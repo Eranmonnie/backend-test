@@ -7,6 +7,7 @@ const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.string().default('3000'),
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+    REDIS_URL: z.string().default('redis://localhost:6379'),
     JWT_SECRET: z.string().min(10, 'JWT_SECRET must be at least 10 characters'),
     PAYSTACK_SECRET_KEY: z.string().min(1, 'PAYSTACK_SECRET_KEY is required'),
     PRODUCTION_URL: z.string().url().optional(),
