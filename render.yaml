@@ -6,51 +6,70 @@ services:
   - type: redis
     name: backend-test-cache
     plan: starter
+    ipAllowList: []
 
   - type: web
     name: backend-test-api
     env: docker
     plan: starter
     region: oregon
+
     dockerfilePath: Dockerfile
     dockerContext: .
     dockerCommand: ./start.sh
+
     healthCheckPath: /health
     autoDeploy: true
+
     envVars:
       - key: NODE_ENV
         value: production
+
       - key: PORT
         value: "3000"
+
       - key: DATABASE_URL
         fromDatabase:
           name: backend-test-db
           property: connectionString
+
       - key: REDIS_URL
         fromService:
           type: redis
           name: backend-test-cache
-          property: connection_string
+          property: connectionString
+
       - key: PRODUCTION_URL
         sync: false
+
       - key: JWT_SECRET
         generateValue: true
+
       - key: PAYSTACK_SECRET_KEY
         sync: false
+
       - key: PAYSTACK_CALLBACK_URL
         sync: false
+
       - key: DISABLE_RATE_LIMIT
         value: "false"
+        
       - key: SMTP_HOST
-        sync: false
+        value: smtp.gmail.com
+
       - key: SMTP_PORT
-        sync: false
+        value: "587"
+
       - key: SMTP_USER
         sync: false
+
       - key: SMTP_PASS
         sync: false
+
       - key: SMTP_FROM_EMAIL
         sync: false
+
       - key: SMTP_FROM_NAME
         value: "Donation Platform"
+
     ipAllowList: []
