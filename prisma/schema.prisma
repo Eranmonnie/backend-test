@@ -1,0 +1,123 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  firstName String   @default("")
+  lastName  String   @default("")
+  password  String
+  pin       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wallet            Wallet?
+  sentDonations     Donation[] @relation("Donor")
+  receivedDonations Donation[] @relation("Beneficiary")
+  refreshTokens     RefreshToken[]
+  
+  // Saved beneficiaries (people this user has sent money to)
+  savedBeneficiaries Beneficiary[] @relation("SavedByUser")
+  // Users who have saved this user as a beneficiary
+  savedByUsers       Beneficiary[] @relation("BeneficiaryUser")
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Decimal  @default(0.0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+}
+
+model Transaction {
+  id        String            @id @default(uuid())
+  walletId  String
+  type      TransactionType
+  amount    Decimal
+  reference String            @unique
+  status    TransactionStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  donationId String?
+
+  wallet   Wallet    @relation(fields: [walletId], references: [id])
+  donation Donation? @relation(fields: [donationId], references: [id])
+}
+
+model Donation {
+  id            String   @id @default(uuid())
+  donorId       String
+  beneficiaryId String
+  amount        Decimal
+  createdAt     DateTime @default(now())
+
+  donor        User          @relation("Donor", fields: [donorId], references: [id])
+  beneficiary  User          @relation("Beneficiary", fields: [beneficiaryId], references: [id])
+  transactions Transaction[]
+}
+
+// Saved beneficiaries - Quick access to people you've sent money to before
+model Beneficiary {
+  id            String   @id @default(uuid())
+  userId        String   // The user who saved this beneficiary
+  beneficiaryId String   // The user who was saved as a beneficiary
+  nickname      String?  // Optional nickname for the beneficiary (unique per user)
+  createdAt     DateTime @default(now())
+
+  user        User @relation("SavedByUser", fields: [userId], references: [id])
+  beneficiary User @relation("BeneficiaryUser", fields: [beneficiaryId], references: [id])
+
+  // Prevent duplicate beneficiaries for the same user
+  @@unique([userId, beneficiaryId])
+  // Prevent duplicate nicknames for the same user (only if nickname is not null)
+  @@unique([userId, nickname])
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model TokenBlacklist {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([expiresAt])
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}

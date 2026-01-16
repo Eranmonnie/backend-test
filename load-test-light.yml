@@ -1,0 +1,46 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 10
+      arrivalRate: 5
+      name: "Light load - 5 rps for 10s"
+  processor: "./load-test-processor.js"
+  # Note: Set DISABLE_RATE_LIMIT=true in server environment for accurate load testing
+
+scenarios:
+  - name: "Health Check"
+    weight: 50
+    flow:
+      - get:
+          url: "/health"
+
+  - name: "User Registration"
+    weight: 25
+    flow:
+      - function: "generateUserData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ email }}"
+            firstName: "{{ firstName }}"
+            lastName: "{{ lastName }}"
+            password: "{{ password }}"
+            pin: "{{ pin }}"
+
+  - name: "User Login"
+    weight: 25
+    flow:
+      - function: "generateLoginData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ email }}"
+            firstName: "{{ firstName }}"
+            lastName: "{{ lastName }}"
+            password: "{{ password }}"
+            pin: "{{ pin }}"
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"

@@ -1,0 +1,120 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 30
+      arrivalRate: 100
+      name: "Sustained load - 100 rps for 30s"
+  plugins:
+    ensure: {}
+  ensure:
+    p99: 500
+  processor: "./load-test-processor.js"
+  # Note: Set DISABLE_RATE_LIMIT=true in server environment for accurate load testing
+
+scenarios:
+  - name: "Health Check"
+    weight: 30
+    flow:
+      - get:
+          url: "/health"
+
+  - name: "User Registration"
+    weight: 20
+    flow:
+      - function: "generateUserData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ email }}"
+            firstName: "{{ firstName }}"
+            lastName: "{{ lastName }}"
+            password: "{{ password }}"
+            pin: "{{ pin }}"
+          capture:
+            - json: "$.user.id"
+              as: "userId"
+
+  - name: "User Login"
+    weight: 20
+    flow:
+      - function: "generateLoginData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ email }}"
+            firstName: "{{ firstName }}"
+            lastName: "{{ lastName }}"
+            password: "{{ password }}"
+            pin: "{{ pin }}"
+          capture:
+            - json: "$.user.id"
+              as: "userId"
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ email }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.accessToken"
+              as: "authToken"
+
+  - name: "Complete Donation Flow"
+    weight: 30
+    flow:
+      # Register donor
+      - function: "generateDonorData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ donorEmail }}"
+            firstName: "{{ donorFirstName }}"
+            lastName: "{{ donorLastName }}"
+            password: "{{ donorPassword }}"
+            pin: "{{ donorPin }}"
+          capture:
+            - json: "$.user.id"
+              as: "donorId"
+      
+      # Register beneficiary
+      - function: "generateBeneficiaryData"
+      - post:
+          url: "/api/auth/register"
+          json:
+            email: "{{ beneficiaryEmail }}"
+            firstName: "{{ beneficiaryFirstName }}"
+            lastName: "{{ beneficiaryLastName }}"
+            password: "{{ beneficiaryPassword }}"
+            pin: "{{ beneficiaryPin }}"
+          capture:
+            - json: "$.user.id"
+              as: "beneficiaryId"
+      
+      # Login donor
+      - post:
+          url: "/api/auth/login"
+          json:
+            email: "{{ donorEmail }}"
+            password: "{{ donorPassword }}"
+          capture:
+            - json: "$.accessToken"
+              as: "donorToken"
+      
+      # Generate valid donation amount
+      - function: "generateDonationAmount"
+      
+      # Make donation (with valid amount ₦500-₦10,000)
+      - post:
+          url: "/api/donations"
+          headers:
+            Authorization: "Bearer {{ donorToken }}"
+          json:
+            beneficiaryId: "{{ beneficiaryId }}"
+            amount: "{{ donationAmount }}"
+            pin: "{{ donorPin }}"
+      
+      # Get donations list
+      - get:
+          url: "/api/donations?page=1&limit=10"
+          headers:
+            Authorization: "Bearer {{ donorToken }}"
+
