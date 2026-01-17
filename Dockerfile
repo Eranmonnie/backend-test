@@ -3,43 +3,53 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# System deps required to build native modules (bcrypt)
-RUN apk add --no-cache python3 make g++
+# System deps required to build native modules (bcrypt, prisma)
+RUN apk add --no-cache python3 make g++ openssl
 
-# Install dependencies (including dev deps for build & prisma)
-COPY package.json package-lock.json ./
+# Install dependencies (including dev deps for build)
+COPY package*.json ./
 RUN npm ci
 
-# Copy source
+# Copy source code
 COPY . .
 
 # Generate Prisma client and build TypeScript
-RUN npm run prisma:generate && npm run build
+RUN npx prisma generate
+RUN npm run build
 
-# Drop dev dependencies to keep final image lean
+# Remove dev dependencies for smaller image
 RUN npm prune --omit=dev
 
-# Production image
+# --- Production stage ---
 FROM node:18-alpine
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Runtime dependencies for Prisma
+# Install runtime dependencies for Prisma
 RUN apk add --no-cache openssl
 
-# Copy package files and production node_modules from builder
-COPY package.json package-lock.json ./
+# Copy package files
+COPY package*.json ./
+
+# Copy built artifacts from builder
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/start.sh ./start.sh
 
-# Ensure the start script is executable
-RUN chmod +x ./start.sh || true
+# Copy start script
+COPY start.sh ./
 
+# Make start script executable (important!)
+RUN chmod +x start.sh
+
+# Expose application port
 EXPOSE 3000
 
-# Run migrations then start (start.sh does this)
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+
+# Run migrations and start server
 CMD ["./start.sh"]

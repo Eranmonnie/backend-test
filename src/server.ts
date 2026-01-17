@@ -11,14 +11,13 @@ import os from 'os';
 const PORT = parseInt(env.PORT, 10);
 const authService = new AuthService();
 const numCPUs = os.cpus().length;
-const USE_CLUSTER = env.NODE_ENV === 'production'; // Only use cluster in production
+const USE_CLUSTER = env.NODE_ENV === 'production'; // cluster in production
 
 const startServer = async () => {
     try {
-        // Start database connection with metrics
+        
         await prisma.$connect();
         
-        // Log database connection info
         try {
             const dbMetrics = await prisma.$queryRaw`
                 SELECT 
@@ -26,21 +25,21 @@ const startServer = async () => {
                     current_setting('max_connections')::int as max_connections;
             ` as any[];
             
-            logger.info(`📊 Database: ${dbMetrics[0].active_connections}/${dbMetrics[0].max_connections} connections active`);
+            logger.info(`Database: ${dbMetrics[0].active_connections}/${dbMetrics[0].max_connections} connections active`);
         } catch (error) {
             logger.warn('Could not fetch database metrics');
         }
         
         app.listen(PORT, () => {
-            logger.info(`🚀 Server running on: http://localhost:${PORT}/api-docs`);
-            logger.info(`📝 Environment: ${env.NODE_ENV}`);
-            logger.info(`⚡ Worker started: ${notificationWorker.name}`);
-            logger.info(`⚡ Worker started: ${donationWorker.name}`);
+            logger.info(`Server running on: http://localhost:${PORT}/api-docs`);
+            logger.info(`Environment: ${env.NODE_ENV}`);
+            logger.info(`Worker started: ${notificationWorker.name}`);
+            logger.info(`Worker started: ${donationWorker.name}`);
             
             if (USE_CLUSTER) {
-                logger.info(`👷 Cluster mode: ${numCPUs} workers`);
+                logger.info(`Cluster mode: ${numCPUs} workers`);
             } else {
-                logger.info(`👷 Single process mode (development)`);
+                logger.info(`Single process mode (development)`);
             }
         });
 
@@ -48,11 +47,11 @@ const startServer = async () => {
         setInterval(async () => {
             try {
                 await authService.cleanupExpiredTokens();
-                logger.debug('✅ Cleaned up expired tokens');
+                logger.debug('Cleaned up expired tokens');
             } catch (error) {
                 logger.error('Failed to cleanup expired tokens:', error);
             }
-        }, 60 * 60 * 1000); // Every 1 hour
+        }, 60 * 60 * 1000); // 1 hour
 
     } catch (error) {
         logger.error('Failed to start server:', error);
@@ -61,8 +60,8 @@ const startServer = async () => {
 };
 
 if (USE_CLUSTER && cluster.isPrimary) {
-    logger.info(`👑 Primary ${process.pid} is running`);
-    logger.info(`🔄 Forking ${numCPUs} workers...`);
+    logger.info(`Primary ${process.pid} is running`);
+    logger.info(`Forking ${numCPUs} workers...`);
 
     // Fork workers
     for (let i = 0; i < numCPUs; i++) {
@@ -70,7 +69,7 @@ if (USE_CLUSTER && cluster.isPrimary) {
     }
 
     cluster.on('exit', (worker, code, signal) => {
-        logger.warn(`⚠️  Worker ${worker.process.pid} died. Restarting...`);
+        logger.warn(`Worker ${worker.process.pid} died. Restarting...`);
         cluster.fork();
     });
 } else {
@@ -88,11 +87,11 @@ const shutdown = async (signal: string) => {
     try {
         // Close database connections
         await prisma.$disconnect();
-        logger.info('✅ Database disconnected');
+        logger.info('Database disconnected');
         
         process.exit(0);
     } catch (error) {
-        logger.error('❌ Error during shutdown:', error);
+        logger.error('Error during shutdown:', error);
         process.exit(1);
     }
 };
