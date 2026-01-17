@@ -10,7 +10,7 @@ services:
     name: backend-test-cache
     plan: starter
     region: oregon
-    maxmemoryPolicy: allkeys-lru
+    maxmemoryPolicy: noeviction
     ipAllowList: []
 
   - type: web

@@ -7,9 +7,9 @@ const RATE_LIMIT_DISABLED = env.DISABLE_RATE_LIMIT;
 
 // Log rate limiting status on startup
 if (RATE_LIMIT_DISABLED) {
-    logger.warn('⚠️  Rate limiting is DISABLED (DISABLE_RATE_LIMIT=true). Only use this for load testing!');
+    logger.warn('Rate limiting is DISABLED (DISABLE_RATE_LIMIT=true). Only use this for load testing!');
 } else {
-    logger.info('✅ Rate limiting is ENABLED for security');
+    logger.info('Rate limiting is ENABLED for security');
 }
 
 /**

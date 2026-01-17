@@ -80,12 +80,10 @@ if (USE_CLUSTER && cluster.isPrimary) {
     }
 }
 
-// Graceful shutdown
 const shutdown = async (signal: string) => {
     logger.info(`${signal} received. Shutting down gracefully...`);
     
     try {
-        // Close database connections
         await prisma.$disconnect();
         logger.info('Database disconnected');
         
